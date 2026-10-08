@@ -1,0 +1,249 @@
+# Copyright (c) cdktn-io
+# SPDX-License-Identifier: MPL-2.0
+#
+# Publishes every package whose package.json version is not yet on a registry.
+# Packages are versioned independently: bump `version` in a PR, merge, then
+# dispatch this workflow from main.
+#
+# `build` packs all packages and asks each registry what is already published
+# (scripts/release.mjs plan --prune). It holds no credentials, and a dry run
+# stops there. Each publish job runs only if its target has something new, in
+# the `release` environment (`pypi` for PyPI): main only, approved by a second
+# team-cdk-terrain member, and the only place the publishing secrets exist.
+#
+# First release of a new package: see docs/adding-a-package.md (npm's first
+# publish uses NPM_TOKEN; PyPI needs a pending trusted publisher).
+
+name: release
+
+on:
+  workflow_dispatch:
+    inputs:
+      dry_run:
+        description: "Dry run: build and show what would be published, publish nothing."
+        required: false
+        type: boolean
+        default: true
+
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions: {}
+
+jobs:
+  build:
+    name: build and plan
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      js: ${{ steps.plan.outputs.js }}
+      python: ${{ steps.plan.outputs.python }}
+      java: ${{ steps.plan.outputs.java }}
+      dotnet: ${{ steps.plan.outputs.dotnet }}
+      go: ${{ steps.plan.outputs.go }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false # never restore a cache into a release build
+      - uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
+        with:
+          python-version: "3.x"
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: corretto
+          java-version: "11"
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.x"
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache: false
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run check
+      - run: pnpm run build
+      - run: pnpm run test
+      - run: pnpm run package
+      - run: pnpm run collect
+      - name: plan
+        id: plan
+        run: |
+          set -euo pipefail
+          echo "## Release plan" >> "$GITHUB_STEP_SUMMARY"
+          node scripts/release.mjs plan --prune | tee -a "$GITHUB_STEP_SUMMARY"
+
+      - uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+        with:
+          name: dist
+          path: dist
+          retention-days: 14
+          if-no-files-found: error
+
+  release_npm:
+    name: Publish to npm
+    needs: build
+    if: ${{ !inputs.dry_run && needs.build.outputs.js == 'true' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+      id-token: write # trusted publishing + provenance
+    steps:
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+          registry-url: "https://registry.npmjs.org"
+      - name: npm >= 11.5.1 (trusted publishing)
+        run: npm install -g npm@11.19.1 && npm --version
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+      - name: Publish
+        env:
+          # Only used when trusted publishing is not configured yet, i.e. a
+          # package's first publish. npm tries OIDC first.
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          set -euo pipefail
+          for tgz in dist/js/*.tgz; do
+            npm publish "$tgz" --access public --provenance
+          done
+
+  release_pypi:
+    name: Publish to PyPI
+    needs: build
+    if: ${{ !inputs.dry_run && needs.build.outputs.python == 'true' }}
+    runs-on: ubuntu-latest
+    environment: pypi
+    permissions:
+      contents: read
+      id-token: write # trusted publishing
+    steps:
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+      - uses: pypa/gh-action-pypi-publish@dc37677b2e1c63e2034f94d8a5b11f265b73ba33 # v1.14.2
+        with:
+          packages-dir: dist/python
+          skip-existing: true
+
+  release_maven:
+    name: Publish to Maven Central
+    needs: build
+    if: ${{ !inputs.dry_run && needs.build.outputs.java == 'true' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/setup-java@b6effb05e454b25005698d916606bdc6ffcbf961 # v5.7.0
+        with:
+          distribution: corretto
+          java-version: "11"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+      - name: Publish
+        env:
+          MAVEN_SERVER_ID: central-ossrh
+          MAVEN_USERNAME: ${{ secrets.MAVEN_USERNAME }}
+          MAVEN_PASSWORD: ${{ secrets.MAVEN_PASSWORD }}
+          MAVEN_GPG_PRIVATE_KEY: ${{ secrets.MAVEN_GPG_PRIVATE_KEY }}
+          MAVEN_GPG_PRIVATE_KEY_PASSPHRASE: ${{ secrets.MAVEN_GPG_PRIVATE_KEY_PASSPHRASE }}
+          MAVEN_OPTS: --add-opens=java.base/java.util=ALL-UNNAMED --add-opens=java.base/java.lang.reflect=ALL-UNNAMED --add-opens=java.base/java.text=ALL-UNNAMED --add-opens=java.desktop/java.awt.font=ALL-UNNAMED
+        run: pnpm exec publib-maven dist/java
+
+  release_nuget:
+    name: Publish to NuGet
+    needs: build
+    if: ${{ !inputs.dry_run && needs.build.outputs.dotnet == 'true' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/setup-dotnet@67a3573c9a986a3f9c594539f4ab511d57bb3ce9 # v4.3.1
+        with:
+          dotnet-version: "8.x"
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+      - name: Publish
+        env:
+          NUGET_API_KEY: ${{ secrets.NUGET_API_KEY }}
+        run: pnpm exec publib-nuget dist/dotnet
+
+  release_go:
+    name: Publish to cdktn-bundlers-go
+    needs: build
+    if: ${{ !inputs.dry_run && needs.build.outputs.go == 'true' }}
+    runs-on: ubuntu-latest
+    environment: release
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4.4.0
+        with:
+          persist-credentials: false
+      - uses: pnpm/action-setup@b906affcce14559ad1aafd4ab0e942779e9f58b1 # v4.3.0
+      - uses: actions/setup-node@a0853c24544627f65ddf259abe73b1d18a591444 # v5.0.0
+        with:
+          node-version: 22
+          package-manager-cache: false
+      - run: pnpm install --frozen-lockfile --ignore-scripts
+      - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
+        with:
+          go-version: "1.26"
+          cache: false
+      - uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4.3.0
+        with:
+          name: dist
+          path: dist
+      # A token scoped to cdktn-bundlers-go contents only, instead of the
+      # org-wide GO_GITHUB_TOKEN PAT.
+      - name: Generate cdktn-bundlers-go push token
+        id: token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.PROJEN_APP_ID }}
+          private-key: ${{ secrets.PROJEN_APP_PRIVATE_KEY }}
+          owner: ${{ github.repository_owner }}
+          repositories: cdktn-bundlers-go
+          permission-contents: write
+      - name: Publish
+        env:
+          GITHUB_TOKEN: x-access-token:${{ steps.token.outputs.token }}
+          GIT_USER_NAME: team-cdk-terrain
+          GIT_USER_EMAIL: github-team-cdk-terrain@cdktn.io
+        run: pnpm exec publib-golang dist/go
