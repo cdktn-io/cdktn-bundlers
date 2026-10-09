@@ -4,6 +4,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    commit-message: # PR titles must be conventional commits
+      prefix: chore
+      include: scope
     groups:
       actions:
         patterns: ["*"]
@@ -11,6 +14,9 @@ updates:
     directory: /
     schedule:
       interval: weekly
+    commit-message: # PR titles must be conventional commits
+      prefix: chore
+      include: scope
     groups:
       npm:
         patterns: ["*"]

@@ -18,7 +18,7 @@ Maven Central, NuGet and Go. `<name>` is lower-kebab-case (`nodejs`,
 ```json
 {
   "name": "@cdktn/bundler-docker-bind",
-  "version": "0.1.0",
+  "version": "0.0.0",
   "description": "…",
   "license": "MPL-2.0",
   "author": { "name": "cdktn-io", "url": "https://cdktn.io", "organization": true },
@@ -67,18 +67,57 @@ root, so every package builds with the same versions. Each package also needs
 a `README.md`, which becomes its page on every registry. Add a `test` script
 once the package has tests; the root runs it if present.
 
+## release-please
+
+Register the package with release-please in the same PR:
+
+- `release-please-config.json`: add `"packages/docker-bind": {}` to `packages`.
+- `.release-please-manifest.json`: add `"packages/docker-bind": "0.0.0"`.
+
+`pnpm run check` fails if either is missing or if `package.json`'s `version`
+differs from the manifest. Never bump `version` by hand: once the PR is merged,
+release-please opens a release PR for the package (first version 0.1.0) and
+keeps it updated as more commits touching `packages/docker-bind` land.
+
 ## First release of a package
 
-Merge the package, then before dispatching `release`:
+There are no long-lived registry credentials, so npm and PyPI need one-time
+setup for each new package. Do it after the package's PR is merged and before
+its first release PR is.
 
-1. **PyPI**: add a pending trusted publisher for `cdktn-bundler-<name>`
-   (owner `cdktn-io`, repository `cdktn-bundlers`, workflow `release.yml`,
-   environment `pypi`). Without it the upload is rejected.
-2. **npm**: nothing beforehand. The first publish falls back to `NPM_TOKEN`.
-   Afterwards, add a trusted publisher on the package (repository
-   `cdktn-bundlers`, workflow `release.yml`, environment `release`) and set
-   publishing access to "disallow tokens".
+1. **PyPI**: add a [pending trusted publisher](https://docs.pypi.org/trusted-publishers/creating-a-project-through-oidc/)
+   for `cdktn-bundler-<name>`: owner `cdktn-io`, repository `cdktn-bundlers`,
+   workflow `release.yml`, environment `pypi`. The first upload then creates
+   the project.
+2. **npm**: a trusted publisher can only be added to a package that already
+   exists, so a maintainer publishes a placeholder by hand. That needs npm
+   11.15 or later and an account with 2FA that can publish to `@cdktn`:
+
+   ```bash
+   mkdir placeholder && cd placeholder
+   cat > package.json <<'EOF'
+   {
+     "name": "@cdktn/bundler-<name>",
+     "version": "0.0.0",
+     "description": "Placeholder. See https://github.com/cdktn-io/cdktn-bundlers",
+     "license": "MPL-2.0",
+     "repository": { "type": "git", "url": "https://github.com/cdktn-io/cdktn-bundlers.git" }
+   }
+   EOF
+   npm publish --access public
+   npm trust github @cdktn/bundler-<name> --file release.yml \
+     --repo cdktn-io/cdktn-bundlers --env release --allow-publish
+   ```
+
+   A new trusted publisher expires unless it is used within 2 days, so run
+   `npm trust` only when the release PR is ready to merge. After the first real
+   release, deprecate the placeholder
+   (`npm deprecate @cdktn/bundler-<name>@0.0.0 "placeholder"`) and set the
+   package's publishing access to "Require two-factor authentication and
+   disallow tokens".
 3. **Maven, NuGet, Go**: nothing. They use the `io.cdktn` namespace, the
    `Io.Cdktn` prefix and `cdktn-bundlers-go`, which already exist.
 
-Dispatch with `dry_run` first; the run summary lists what would be published.
+If the npm step is missed, the release still publishes everywhere else and
+the npm job fails naming the package. Bootstrap it, then dispatch `release`
+(with `dry_run` off) to publish the missing npm version.

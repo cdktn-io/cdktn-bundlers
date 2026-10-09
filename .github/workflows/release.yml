@@ -1,22 +1,27 @@
 # Copyright (c) cdktn-io
 # SPDX-License-Identifier: MPL-2.0
 #
-# Publishes every package whose package.json version is not yet on a registry.
-# Packages are versioned independently: bump `version` in a PR, merge, then
-# dispatch this workflow from main.
+# On every push to main, release-please opens or updates one release PR per
+# package with pending changes (version bump + CHANGELOG, from conventional
+# commit titles). Merging a release PR tags `bundler-<name>-v<version>` and
+# creates the GitHub release; this run then publishes.
 #
 # `build` packs all packages and asks each registry what is already published
-# (scripts/release.mjs plan --prune). It holds no credentials, and a dry run
-# stops there. Each publish job runs only if its target has something new, in
-# the `release` environment (`pypi` for PyPI): main only, approved by a second
-# team-cdk-terrain member, and the only place the publishing secrets exist.
+# (scripts/release.mjs plan --prune). It holds no credentials. Each publish job
+# runs only if its target has something new, in the `release` environment
+# (`pypi` for PyPI): main only, approved by a second team-cdk-terrain member,
+# and the only place the publishing secrets exist. Because publishing is
+# driven by what the registries lack, dispatching this workflow retries any
+# failed or skipped publish; `dry_run` (the default) only shows the plan.
 #
-# First release of a new package: see docs/adding-a-package.md (npm's first
-# publish uses NPM_TOKEN; PyPI needs a pending trusted publisher).
+# A new package needs one-time registry setup before its first release PR is
+# merged: docs/adding-a-package.md.
 
 name: release
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
     inputs:
       dry_run:
@@ -32,8 +37,35 @@ concurrency:
 permissions: {}
 
 jobs:
+  release_please:
+    name: release-please
+    if: ${{ github.event_name == 'push' }}
+    runs-on: ubuntu-latest
+    permissions: {}
+    outputs:
+      releases_created: ${{ steps.release.outputs.releases_created }}
+    steps:
+      # Release PRs opened with GITHUB_TOKEN would not trigger CI, and `build`
+      # is a required check, so they would never be mergeable.
+      - name: Generate release-please token
+        id: token
+        uses: actions/create-github-app-token@29824e69f54612133e76f7eaac726eef6c875baf # v2.2.1
+        with:
+          app-id: ${{ secrets.PROJEN_APP_ID }}
+          private-key: ${{ secrets.PROJEN_APP_PRIVATE_KEY }}
+          permission-contents: write
+          permission-pull-requests: write
+          permission-issues: write # release-please's PR labels
+      - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        id: release
+        with:
+          token: ${{ steps.token.outputs.token }}
+
   build:
     name: build and plan
+    needs: release_please
+    # release_please is skipped on dispatch; on push, build only after a release.
+    if: ${{ !cancelled() && (github.event_name == 'workflow_dispatch' || needs.release_please.outputs.releases_created == 'true') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -108,16 +140,23 @@ jobs:
         with:
           name: dist
           path: dist
+      # Trusted publishing only: there is no npm token. A package that does not
+      # exist on npm yet cannot have a trusted publisher, so it is reported and
+      # skipped (docs/adding-a-package.md); the others still publish.
       - name: Publish
-        env:
-          # Only used when trusted publishing is not configured yet, i.e. a
-          # package's first publish. npm tries OIDC first.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
           set -euo pipefail
+          missing=()
           for tgz in dist/js/*.tgz; do
+            name="$(tar -xzOf "$tgz" package/package.json | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).name')"
+            if ! npm view "$name" name >/dev/null 2>&1; then
+              echo "::error::$name does not exist on npm yet; bootstrap it (docs/adding-a-package.md), then dispatch this workflow"
+              missing+=("$name")
+              continue
+            fi
             npm publish "$tgz" --access public --provenance
           done
+          [ ${#missing[@]} -eq 0 ]
 
   release_pypi:
     name: Publish to PyPI

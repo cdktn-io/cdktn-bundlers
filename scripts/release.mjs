@@ -4,7 +4,8 @@
 // Release helper for the packages/* workspace. Subcommands:
 //
 //   check     validate every package.json against the repository's naming and
-//             publishing conventions (docs/adding-a-package.md)
+//             publishing conventions (docs/adding-a-package.md), and that
+//             release-please's config and manifest list exactly packages/*
 //   collect   merge each package's jsii-pacmak output (packages/*/dist/<lang>)
 //             into dist/<lang> and write dist/manifest.json
 //   plan      ask each registry which collected artifacts are already
@@ -26,6 +27,8 @@ const ROOT = path.resolve(import.meta.dirname, "..");
 const PACKAGES = path.join(ROOT, "packages");
 const DIST = path.join(ROOT, "dist");
 const MANIFEST = path.join(DIST, "manifest.json");
+const RP_CONFIG = path.join(ROOT, "release-please-config.json");
+const RP_MANIFEST = path.join(ROOT, ".release-please-manifest.json");
 
 const REPO_URL = "https://github.com/cdktn-io/cdktn-bundlers.git";
 const GO_REPO = "github.com/cdktn-io/cdktn-bundlers-go";
@@ -75,6 +78,20 @@ function readPackage(dir) {
 function check() {
   const errors = [];
   const dirs = packageDirs();
+  const readJson = (file) => JSON.parse(fs.readFileSync(file, "utf8"));
+  const rpPackages = Object.keys(readJson(RP_CONFIG).packages).sort();
+  const rpVersions = readJson(RP_MANIFEST);
+  const wantPaths = dirs.map((dir) => `packages/${dir}`);
+  for (const [file, paths] of [
+    ["release-please-config.json packages", rpPackages],
+    [".release-please-manifest.json", Object.keys(rpVersions).sort()],
+  ]) {
+    if (JSON.stringify(paths) !== JSON.stringify(wantPaths)) {
+      errors.push(
+        `${file} lists ${JSON.stringify(paths)}, expected ${JSON.stringify(wantPaths)}`,
+      );
+    }
+  }
   for (const dir of dirs) {
     const where = `packages/${dir}/package.json`;
     if (!/^[a-z][a-z0-9]*(-[a-z0-9]+)*$/.test(dir)) {
@@ -96,6 +113,8 @@ function check() {
       }
     };
     expect("name", pkg.name, want.name);
+    // release-please owns versions; a hand edit would desync the manifest.
+    expect("version", pkg.version, rpVersions[`packages/${dir}`]);
     expect("private", pkg.private ?? false, false);
     expect("license", pkg.license, "MPL-2.0");
     // npm provenance is rejected unless repository.url matches the repository
