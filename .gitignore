@@ -1,0 +1,10 @@
+node_modules/
+*.tsbuildinfo
+
+# jsii / jsii-pacmak output, per package and collected at the root (scripts/release.mjs)
+dist/
+packages/*/lib/
+packages/*/.jsii
+packages/*/tsconfig.json
+packages/*/.npmignore
+packages/*/.warnings.jsii.js
