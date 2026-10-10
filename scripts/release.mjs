@@ -6,6 +6,8 @@
 //   check     validate every package.json against the repository's naming and
 //             publishing conventions (docs/adding-a-package.md), and that
 //             release-please's config and manifest list exactly packages/*
+//   clean     delete every packages/*/dist (jsii-pacmak never clears it, and
+//             collect would pick up a previous version's artifacts)
 //   collect   merge each package's jsii-pacmak output (packages/*/dist/<lang>)
 //             into dist/<lang> and write dist/manifest.json
 //   plan      ask each registry which collected artifacts are already
@@ -142,6 +144,12 @@ function entries(root, sub) {
   const dir = path.join(root, sub);
   if (!fs.existsSync(dir)) return [];
   return fs.readdirSync(dir).map((f) => path.posix.join(sub, f));
+}
+
+function clean() {
+  for (const dir of packageDirs()) {
+    fs.rmSync(path.join(PACKAGES, dir, "dist"), { recursive: true, force: true });
+  }
 }
 
 function collect() {
@@ -286,6 +294,9 @@ switch (command) {
   case "check":
     check();
     break;
+  case "clean":
+    clean();
+    break;
   case "collect":
     collect();
     break;
@@ -293,6 +304,6 @@ switch (command) {
     await plan({ prune: args.includes("--prune") });
     break;
   default:
-    console.error("usage: release.mjs check | collect | plan [--prune]");
+    console.error("usage: release.mjs check | clean | collect | plan [--prune]");
     process.exit(2);
 }
