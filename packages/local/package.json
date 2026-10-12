@@ -1,0 +1,70 @@
+{
+  "name": "@cdktn/bundler-local",
+  "version": "0.0.0",
+  "description": "Host-process asset bundler for CDK Terrain",
+  "license": "MPL-2.0",
+  "author": {
+    "name": "cdktn-io",
+    "url": "https://cdktn.io",
+    "organization": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cdktn-io/cdktn-bundlers.git",
+    "directory": "packages/local"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    ".jsii"
+  ],
+  "scripts": {
+    "build": "jsii",
+    "package": "jsii-pacmak",
+    "test": "jest"
+  },
+  "peerDependencies": {
+    "cdktn": "^0.25.0-pre.53",
+    "constructs": "^10.6.0"
+  },
+  "devDependencies": {
+    "cdktn": "0.25.0-pre.53",
+    "constructs": "10.6.0",
+    "jest": "29.7.0",
+    "ts-jest": "29.4.14",
+    "@types/jest": "29.5.14"
+  },
+  "jsii": {
+    "outdir": "dist",
+    "tsc": {
+      "outDir": "lib",
+      "rootDir": "src"
+    },
+    "excludeTypescript": [
+      "src/**/__tests__/**"
+    ],
+    "targets": {
+      "python": {
+        "distName": "cdktn-bundler-local",
+        "module": "cdktn_bundler_local"
+      },
+      "java": {
+        "package": "io.cdktn.bundler.local",
+        "maven": {
+          "groupId": "io.cdktn",
+          "artifactId": "cdktn-bundler-local"
+        }
+      },
+      "dotnet": {
+        "namespace": "Io.Cdktn.Bundler.Local",
+        "packageId": "Io.Cdktn.Bundler.Local"
+      },
+      "go": {
+        "moduleName": "github.com/cdktn-io/cdktn-bundlers-go",
+        "packageName": "bundlerlocal"
+      }
+    }
+  }
+}
