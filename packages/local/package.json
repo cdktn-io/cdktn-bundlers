@@ -57,10 +57,6 @@
           "artifactId": "cdktn-bundler-local"
         }
       },
-      "dotnet": {
-        "namespace": "Io.Cdktn.Bundler.Local",
-        "packageId": "Io.Cdktn.Bundler.Local"
-      },
       "go": {
         "moduleName": "github.com/cdktn-io/cdktn-bundlers-go",
         "packageName": "bundlerlocal"
