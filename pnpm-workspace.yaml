@@ -1,2 +1,4 @@
 packages:
   - packages/*
+minimumReleaseAgeExclude:
+  - cdktn@0.25.0-pre.53
