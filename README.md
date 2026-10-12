@@ -11,7 +11,6 @@ describes how to add one.
 
 ```
 packages/<name>/     one jsii package per bundler (@cdktn/bundler-<name>)
-scripts/release.mjs  convention checks, artifact collection, release planning
 release-please-config.json, .release-please-manifest.json
                      release-please packages and their current versions
 ```
@@ -40,9 +39,10 @@ conventional-commit PR titles (enforced by the `Validate PR title` check):
 
 Publishing has no long-lived registry credentials: npm and PyPI use trusted
 publishing, which a new package has to be set up for once
-([docs/adding-a-package.md](docs/adding-a-package.md)). To retry a failed
-publish, dispatch the `release` workflow; it publishes whatever the registries
-are missing, and by default it is a dry run that only shows the plan.
+([docs/adding-a-package.md](docs/adding-a-package.md)). Every publish step
+skips versions its registry already has, so a failed publish is retried with
+"Re-run failed jobs" on the same workflow run (within 14 days, while its
+build artifact is kept).
 
 Go modules are published to
 [cdktn-io/cdktn-bundlers-go](https://github.com/cdktn-io/cdktn-bundlers-go).

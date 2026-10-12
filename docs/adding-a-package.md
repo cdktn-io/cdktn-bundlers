@@ -2,8 +2,9 @@
 
 Each bundler is a jsii package in `packages/<name>`, published to npm, PyPI,
 Maven Central, NuGet and Go. `<name>` is lower-kebab-case (`nodejs`,
-`docker-bind`), and every published name derives from it. `pnpm run check`
-(part of CI's `build` job) enforces this.
+`docker-bind`), and every published name derives from it. Use exactly these
+names: the `io.cdktn` Maven namespace, the `@cdktn` npm scope and
+`cdktn-bundlers-go` are what the release workflow can publish to.
 
 | Target | Name for `packages/docker-bind` |
 | --- | --- |
@@ -74,10 +75,10 @@ Register the package with release-please in the same PR:
 - `release-please-config.json`: add `"packages/docker-bind": {}` to `packages`.
 - `.release-please-manifest.json`: add `"packages/docker-bind": "0.0.0"`.
 
-`pnpm run check` fails if either is missing or if `package.json`'s `version`
-differs from the manifest. Never bump `version` by hand: once the PR is merged,
-release-please opens a release PR for the package (first version 0.1.0) and
-keeps it updated as more commits touching `packages/docker-bind` land.
+A package missing from either file is never released. Never bump `version`
+by hand: once the PR is merged, release-please opens a release PR for the
+package (first version 0.1.0) and keeps it updated as more commits touching
+`packages/docker-bind` land.
 
 ## First release of a package
 
@@ -119,5 +120,5 @@ its first release PR is.
    `Io.Cdktn` prefix and `cdktn-bundlers-go`, which already exist.
 
 If the npm step is missed, the release still publishes everywhere else and
-the npm job fails naming the package. Bootstrap it, then dispatch `release`
-(with `dry_run` off) to publish the missing npm version.
+only the npm job fails. Bootstrap the package, then use "Re-run failed jobs"
+on that workflow run.

@@ -1,7 +1,7 @@
 # Copyright (c) cdktn-io
 # SPDX-License-Identifier: MPL-2.0
 #
-# `build` is the required status check on main (cdktn-repository-manager), so
+# `build` is a required status check on main (cdktn-repository-manager), so
 # keep this job's name stable and keep everything a PR must pass inside it.
 
 name: ci
@@ -48,8 +48,6 @@ jobs:
           go-version: "1.26"
 
       - run: pnpm install --frozen-lockfile
-      - run: pnpm run check
       - run: pnpm run build
       - run: pnpm run test
       - run: pnpm run package
-      - run: pnpm run collect
