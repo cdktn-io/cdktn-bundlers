@@ -1,2 +1,5 @@
 packages:
   - packages/*
+# cdktn 0.25.0 was published 2026-10-27; drop once older than minimumReleaseAge
+minimumReleaseAgeExclude:
+  - cdktn@0.25.0
