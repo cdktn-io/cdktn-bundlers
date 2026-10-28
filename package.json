@@ -9,11 +9,11 @@
     "package": "pnpm -r --if-present run package"
   },
   "devDependencies": {
-    "@types/node": "^22.20.5",
-    "jsii": "~6.0.0",
-    "jsii-pacmak": "^1.141.0",
-    "publib": "0.3.6",
-    "typescript": "~6.0.0"
+    "@types/node": "^26.6.5",
+    "jsii": "~6.0.18",
+    "jsii-pacmak": "^1.142.0",
+    "publib": "0.3.10",
+    "typescript": "~7.0.2"
   },
   "packageManager": "pnpm@11.17.0",
   "engines": {
