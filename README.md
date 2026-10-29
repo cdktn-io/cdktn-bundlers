@@ -4,8 +4,12 @@ Asset bundlers maintained by the cdktn team: implementations of cdktn's
 `IAssetBundler` interface, each published as its own package to npm, PyPI,
 Maven Central, NuGet and Go.
 
-There are no packages yet. [docs/adding-a-package.md](docs/adding-a-package.md)
-describes how to add one.
+Packages:
+
+- `@cdktn/bundler-local`: runs a build with the host toolchain.
+- `@cdktn/bundler-docker`: runs a build in a docker container.
+
+[docs/adding-a-package.md](docs/adding-a-package.md) describes how to add one.
 
 ## Layout
 
