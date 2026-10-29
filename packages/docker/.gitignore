@@ -1,0 +1,8 @@
+dist/
+lib/
+.jsii
+tsconfig.json
+tsconfig.tsbuildinfo
+*.tsbuildinfo
+node_modules
+coverage/

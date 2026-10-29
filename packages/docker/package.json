@@ -1,0 +1,70 @@
+{
+  "name": "@cdktn/bundler-docker",
+  "version": "0.0.0",
+  "description": "Container-based asset bundler for CDK Terrain",
+  "license": "MPL-2.0",
+  "author": {
+    "name": "cdktn-io",
+    "url": "https://cdktn.io",
+    "organization": true
+  },
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/cdktn-io/cdktn-bundlers.git",
+    "directory": "packages/docker"
+  },
+  "main": "lib/index.js",
+  "types": "lib/index.d.ts",
+  "files": [
+    "lib/**/*.js",
+    "lib/**/*.d.ts",
+    ".jsii"
+  ],
+  "scripts": {
+    "build": "jsii",
+    "package": "jsii-pacmak",
+    "test": "jest"
+  },
+  "peerDependencies": {
+    "cdktn": "^0.25.0",
+    "constructs": "^10.6.0"
+  },
+  "devDependencies": {
+    "cdktn": "0.25.0",
+    "constructs": "10.6.0",
+    "jest": "30.5.2",
+    "ts-jest": "29.4.15",
+    "@types/jest": "30.0.0"
+  },
+  "jsii": {
+    "outdir": "dist",
+    "tsc": {
+      "outDir": "lib",
+      "rootDir": "src"
+    },
+    "excludeTypescript": [
+      "src/**/__tests__/**"
+    ],
+    "targets": {
+      "python": {
+        "distName": "cdktn-bundler-docker",
+        "module": "cdktn_bundler_docker"
+      },
+      "java": {
+        "package": "io.cdktn.bundler.docker",
+        "maven": {
+          "groupId": "io.cdktn",
+          "artifactId": "cdktn-bundler-docker"
+        }
+      },
+      "dotnet": {
+        "namespace": "Io.Cdktn.Bundler.Docker",
+        "packageId": "Io.Cdktn.Bundler.Docker"
+      },
+      "go": {
+        "moduleName": "github.com/cdktn-io/cdktn-bundlers-go",
+        "packageName": "bundlerdocker"
+      }
+    }
+  }
+}
