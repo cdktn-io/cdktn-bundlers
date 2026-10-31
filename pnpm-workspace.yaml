@@ -1,4 +1,11 @@
 packages:
   - packages/*
+allowBuilds:
+  "@parcel/watcher": false
+  unrs-resolver: false
 minimumReleaseAgeExclude:
   - cdktn@0.25.0
+overrides:
+  # GHSA-gcqx-w48m-w2h4 has no patched release. jest-config only needs deepmerge
+  # for its mergeConfig helper and for preset plus project "globals" merging.
+  deepmerge: "-"
