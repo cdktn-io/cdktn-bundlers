@@ -81,6 +81,17 @@ describe("LocalBundler", () => {
     expect(spy.mock.calls[0][2]?.cwd).toBe(source);
   });
 
+  test("defaults the working directory to the parent of a file source", () => {
+    const fileSource = path.join(source, "handler.zip");
+    fs.writeFileSync(fileSource, "x");
+    const bundler = new LocalBundler({ command: ["sh", "-c", "true"] });
+    const spy = mockSpawn({ status: 0, signal: null });
+
+    bundler.bundle({ source: fileSource, outputDir });
+
+    expect(spy.mock.calls[0][2]?.cwd).toBe(source);
+  });
+
   test("honours an explicit working directory", () => {
     const workingDirectory = tmpDir("bundler-local-cwd-");
     try {
