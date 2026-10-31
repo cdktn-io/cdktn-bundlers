@@ -58,7 +58,7 @@ export interface LocalBundlerProps {
   /**
    * The working directory the command runs in.
    *
-   * @default - the asset source directory
+   * @default - the asset source directory, or its parent for a file source
    */
   readonly workingDirectory?: string;
 
@@ -143,7 +143,11 @@ export class LocalBundler implements IAssetBundler {
   public bundle(options: BundleOptions): BundleResult {
     const { source, outputDir } = options;
     const [program, ...args] = this.command;
-    const cwd = this.workingDirectory ?? source;
+    const cwd =
+      this.workingDirectory ??
+      (existsSync(source) && statSync(source).isFile()
+        ? path.dirname(source)
+        : source);
 
     // Node reports ENOENT for a missing cwd too, which would otherwise be
     // mistaken for a missing program and silently decline.
