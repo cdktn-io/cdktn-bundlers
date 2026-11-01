@@ -29,33 +29,43 @@ new TerraformAsset(this, "asset", {
 });
 ```
 
-The container mounts the source read-write at `/asset-input`. The build writes
-its output to `/asset-output`. Build steps that modify `/asset-input` change the
-host source under `BIND_MOUNT`.
+The container mounts the source directory read-only at `/asset-input` under
+`BIND_MOUNT`. The build writes its output to `/asset-output`. A build step that
+writes to `/asset-input` fails under `BIND_MOUNT`. Copy the source to a
+writable path inside the container first.
+
+`DockerBundler` accepts only directory sources. A file source throws before the
+container starts.
+
+### Output type
+
+`outputType` sets how the bundler reads `/asset-output`. The default,
+`BundlingOutput.AUTO_DISCOVER`, stages a lone output file as `AssetType.FILE`
+and any other output as a directory. Set `outputFileName` to name a
+single-file artifact.
 
 ### Entrypoint
 
 The `entrypoint` option sets `--entrypoint` to the first array element. The
 remaining elements go before `command` in the container arguments.
 
-### Image builds
-
-`DockerImage.fromBuild` tags the image from a hash of the build path and the
-build options. Identical input gives an identical tag. Set `cacheDisabled` to
-add `--no-cache` to `docker build`.
-
 ### Bundler key
 
 The bundler key covers the image, command, file access mode, environment,
-entrypoint, working directory, platform, network, security option, user, and
-helper image.
+entrypoint, working directory, platform, network, security option, user, output
+type, and helper image.
+
 ### Host paths
+
 Bind mounts use `--mount type=bind`. Host paths that contain `:` (for example
 `C:\work`) or `,` work. The bundler resolves relative host paths to absolute
 paths.
+
 ### Images
-`DockerBundler` accepts only a registry reference in `image`. It does not accept
-the result of `DockerImage.fromBuild`.
+
+`DockerBundler` accepts only a registry reference in `image`. Build and push a
+custom image before you use it.
+
 ### File access modes
 
 - `BIND_MOUNT` (default) — bind-mounts the host source and output directories
@@ -67,7 +77,8 @@ the result of `DockerImage.fromBuild`.
   the build fails.
 
 `VOLUME_COPY` uses a short-lived helper container to seed the input volume and
-fix volume ownership. The helper runs as root (`-u 0`) with `--entrypoint sh`. It uses the same
+fix volume ownership. The bundler sets the ownership of the input tree after
+it copies the source in. The helper runs as root (`-u 0`) with `--entrypoint sh`. It uses the same
 `platform`, `network`, and `securityOpt` as the build container. It reuses the build image for this by default, so the
 bundler never pulls an image the caller did not specify. If the build image has
 no POSIX shell or `chown` (e.g. a `scratch`- or distroless-based image), set

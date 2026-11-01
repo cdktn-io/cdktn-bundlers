@@ -43,6 +43,13 @@ export interface DockerVolume {
    * Absolute path inside the container.
    */
   readonly containerPath: string;
+
+  /**
+   * Mount the path read-only.
+   *
+   * @default false
+   */
+  readonly readOnly?: boolean;
 }
 
 /**
@@ -142,6 +149,7 @@ export function bindMountSpec(volume: DockerVolume): string {
     "type=bind",
     csv(`source=${path.resolve(volume.hostPath)}`),
     csv(`target=${volume.containerPath}`),
+    ...(volume.readOnly ? ["readonly"] : []),
   ].join(",");
 }
 
@@ -224,9 +232,7 @@ export function dockerExec(
 /**
  * Run a docker image once with the given options and wait for it to exit.
  *
- * The `DockerImage` class in `./bundling` is the public entry point; this is
- * the shared arg-building/exec step beneath both `fromRegistry` and
- * `fromBuild` images.
+ * The `DockerImage` class in `./bundling` is the public entry point.
  */
 export function runDockerImage(
   image: string,

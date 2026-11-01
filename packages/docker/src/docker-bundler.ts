@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 import { createHash, randomBytes } from "crypto";
+import { readdirSync, statSync } from "fs";
 import * as path from "path";
 import { BundleOptions, BundleResult, BundlerKey, IAssetBundler } from "cdktn";
 import { DockerImage } from "./bundling";
@@ -41,14 +42,39 @@ export enum BundlingFileAccess {
 }
 
 /**
+ * How the bundler interprets what its command wrote to the output directory.
+ */
+export enum BundlingOutput {
+  /**
+   * The output directory contains a single archive file that is the artifact.
+   */
+  ARCHIVED = "archived",
+
+  /**
+   * The output directory holds the artifact as a tree of files.
+   */
+  NOT_ARCHIVED = "not-archived",
+
+  /**
+   * The output directory contains a single file that is the artifact.
+   */
+  SINGLE_FILE = "single-file",
+
+  /**
+   * A single file in the output directory is treated as the artifact;
+   * otherwise the directory itself is.
+   */
+  AUTO_DISCOVER = "auto-discover",
+}
+
+/**
  * Configuration for {@link DockerBundler}.
  */
 export interface DockerBundlerProps {
   /**
    * The image to run the build in, as a registry reference.
    *
-   * Locally built images (`DockerImage.fromBuild`) are not supported; build and
-   * push the image first.
+   * Locally built images are not supported; build and push the image first.
    */
   readonly image: string;
 
@@ -59,6 +85,23 @@ export interface DockerBundlerProps {
    * artifact to `/asset-output`.
    */
   readonly command: string[];
+
+  /**
+   * How the command's output is interpreted.
+   *
+   * @default BundlingOutput.AUTO_DISCOVER
+   */
+  readonly outputType?: BundlingOutput;
+
+  /**
+   * The file name to stage a single-file artifact under.
+   *
+   * Only meaningful when the result is a single file staged as
+   * `AssetType.FILE`.
+   *
+   * @default - the basename of the asset source path
+   */
+  readonly outputFileName?: string;
 
   /**
    * The user to run the container as.
@@ -138,46 +181,56 @@ export interface DockerBundlerProps {
  *
  * The build runs in an image the caller specifies, isolated from the host
  * toolchain, which makes the artifact reproducible across machines that share
- * the same image. The source is mounted read-write at `/asset-input` and the
- * build writes to `/asset-output`, either through a bind mount or by copying
- * through a named volume.
+ * the same image. The source directory is mounted read-only at `/asset-input`
+ * under `BIND_MOUNT`, or copied into a named volume under `VOLUME_COPY`. The
+ * build writes to `/asset-output`. File sources are not supported.
  *
  * `bundle` throws when the docker binary is missing and never declines, so a
  * bundler chain does not fall through to the next bundler.
  */
 export class DockerBundler implements IAssetBundler {
   public readonly bundlerKey?: string;
+  public readonly outputFileName?: string;
 
   private readonly props: DockerBundlerProps;
   private readonly fileAccess: BundlingFileAccess;
+  private readonly outputType: BundlingOutput;
 
   constructor(props: DockerBundlerProps) {
     this.props = props;
     this.fileAccess = props.bundlingFileAccess ?? BundlingFileAccess.BIND_MOUNT;
+    this.outputType = props.outputType ?? BundlingOutput.AUTO_DISCOVER;
+    this.outputFileName = props.outputFileName;
     assertImageReference(props.image);
     if (props.volumeCopyHelperImage) {
       assertImageReference(props.volumeCopyHelperImage);
     }
 
-    // The image reference and command are the whole build, so both belong in
-    // the key; the transfer mode is included because it can change the
-    // resulting file ownership and layout.
-    let key = BundlerKey.of("docker", props.image, ...props.command)
-      .add(this.fileAccess)
+    // Every segment is labelled so a value in one field can never serialise
+    // to the same string as a value in another (e.g. an environment entry vs.
+    // the helper image). The transfer mode is included because it can change
+    // the resulting file ownership and layout.
+    let key = BundlerKey.of("docker")
+      .add(`image=${props.image}`)
+      .add(`cmd=${JSON.stringify(props.command)}`)
+      .add(`out=${this.outputType}`)
+      .add(`access=${this.fileAccess}`)
       .add(`entrypoint=${JSON.stringify(props.entrypoint ?? null)}`)
       .add(`workdir=${props.workingDirectory ?? ""}`)
       .add(`platform=${props.platform ?? ""}`)
       .add(`network=${props.network ?? ""}`)
       .add(`securityOpt=${props.securityOpt ?? ""}`)
       .add(`user=${props.user ?? ""}`);
-    if (props.environment) {
-      key = key.withEnv(props.environment);
+    if (this.fileAccess === BundlingFileAccess.VOLUME_COPY) {
+      key = key.add(`helper=${props.volumeCopyHelperImage ?? ""}`);
     }
-    if (
-      this.fileAccess === BundlingFileAccess.VOLUME_COPY &&
-      props.volumeCopyHelperImage
-    ) {
-      key = key.add(`helper=${props.volumeCopyHelperImage}`);
+    const environment = props.environment;
+    if (environment) {
+      key = key.add(
+        ...Object.keys(environment)
+          .sort()
+          .map((k) => `env=${k}=${environment[k]}`),
+      );
     }
     // Digested like LocalBundler's key: keeps bundlerKey short and fixed-length
     // regardless of how long the image reference or command gets.
@@ -188,12 +241,23 @@ export class DockerBundler implements IAssetBundler {
   }
 
   public bundle(options: BundleOptions): BundleResult {
+    if (!statSync(options.source).isDirectory()) {
+      throw new Error(
+        `DockerBundler supports only directory sources, got a file: ${options.source}`,
+      );
+    }
     if (this.fileAccess === BundlingFileAccess.VOLUME_COPY) {
       this.volumeCopy(options.source, options.outputDir);
     } else {
       this.bindMount(options.source, options.outputDir);
     }
-    return BundleResult.directory(options.outputDir);
+    const artifact = determineBundledArtifact(
+      options.outputDir,
+      this.outputType,
+    );
+    return statSync(artifact).isDirectory()
+      ? BundleResult.directory(artifact)
+      : BundleResult.file(artifact);
   }
 
   private bindMount(source: string, outputDir: string): void {
@@ -204,7 +268,11 @@ export class DockerBundler implements IAssetBundler {
       entrypoint: this.props.entrypoint,
       workingDirectory: this.props.workingDirectory ?? BUNDLING_INPUT_DIR,
       volumes: [
-        { hostPath: source, containerPath: BUNDLING_INPUT_DIR },
+        {
+          hostPath: source,
+          containerPath: BUNDLING_INPUT_DIR,
+          readOnly: true,
+        },
         { hostPath: outputDir, containerPath: BUNDLING_OUTPUT_DIR },
       ],
       network: this.props.network,
@@ -245,12 +313,27 @@ export class DockerBundler implements IAssetBundler {
         `${outputVolume}:${BUNDLING_OUTPUT_DIR}`,
         this.props.volumeCopyHelperImage ?? this.props.image,
         "-c",
-        `mkdir -p ${BUNDLING_INPUT_DIR} && chown -R ${user} ${BUNDLING_OUTPUT_DIR} && chown -R ${user} ${BUNDLING_INPUT_DIR}`,
+        `mkdir -p ${BUNDLING_INPUT_DIR} && chown -R ${user} ${BUNDLING_OUTPUT_DIR}`,
       ]);
       dockerExec([
         "cp",
         `${source}/.`,
         `${helperContainer}:${BUNDLING_INPUT_DIR}`,
+      ]);
+      // `docker cp` creates files as root, so ownership is fixed afterwards.
+      dockerExec([
+        "run",
+        "--rm",
+        "-u",
+        "0",
+        ...this.helperOptions(),
+        "--entrypoint",
+        "sh",
+        "--volumes-from",
+        helperContainer,
+        this.props.volumeCopyHelperImage ?? this.props.image,
+        "-c",
+        `chown -R ${user} ${BUNDLING_INPUT_DIR}`,
       ]);
 
       DockerImage.fromRegistry(this.props.image).run({
@@ -303,5 +386,38 @@ export class DockerBundler implements IAssetBundler {
     const uid = process.getuid?.() ?? 1000;
     const gid = process.getgid?.() ?? 1000;
     return `${uid}:${gid}`;
+  }
+}
+
+/**
+ * Resolves the built artifact inside an output directory according to the
+ * declared output type.
+ */
+function determineBundledArtifact(
+  outputDir: string,
+  outputType: BundlingOutput,
+): string {
+  const entries = readdirSync(outputDir);
+  const files = entries.filter((entry) =>
+    statSync(path.join(outputDir, entry)).isFile(),
+  );
+  switch (outputType) {
+    case BundlingOutput.NOT_ARCHIVED:
+      return outputDir;
+    case BundlingOutput.ARCHIVED:
+    case BundlingOutput.SINGLE_FILE:
+      if (files.length !== 1) {
+        throw new Error(
+          `Bundling output directory must contain exactly one file for ` +
+            `output type ${outputType}, found ${files.length}: ${outputDir}`,
+        );
+      }
+      return path.join(outputDir, files[0]);
+    case BundlingOutput.AUTO_DISCOVER:
+      return entries.length === 1 && files.length === 1
+        ? path.join(outputDir, files[0])
+        : outputDir;
+    default:
+      throw new Error(`Unsupported bundling output type: ${outputType}`);
   }
 }

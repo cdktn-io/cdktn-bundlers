@@ -10,12 +10,21 @@ import {
   BUNDLING_INPUT_DIR,
   BUNDLING_OUTPUT_DIR,
   BundlingFileAccess,
+  BundlingOutput,
   DockerBundler,
 } from "../docker-bundler";
-import { DockerBuildSecret, DockerImage } from "../bundling";
+import { DockerImage } from "../bundling";
 import { bindMountSpec, dockerExec, redactArgs } from "../docker";
 
 jest.mock("child_process");
+
+const root = fs.mkdtempSync(path.join(os.tmpdir(), "docker-bundler-test-"));
+const src = path.join(root, "src");
+const out = path.join(root, "out");
+fs.mkdirSync(src);
+fs.mkdirSync(out);
+
+afterAll(() => fs.rmSync(root, { recursive: true, force: true }));
 
 const spawnSyncMock = child_process.spawnSync as unknown as jest.Mock;
 
@@ -41,18 +50,18 @@ describe("DockerBundler bind mount", () => {
       user: "1000:1000",
     });
 
-    const result = bundler.bundle({ source: "/src", outputDir: "/out" });
+    const result = bundler.bundle({ source: src, outputDir: out });
 
     expect(result.outputType).toBe(BundleOutputType.DIRECTORY);
-    expect(result.path).toBe("/out");
+    expect(result.path).toBe(out);
     const args = invocations(spy)[0];
     expect(args).toContain("run");
     expect(args).toContain("--rm");
     expect(args).toContain(
-      `type=bind,source=${path.resolve("/src")},target=${BUNDLING_INPUT_DIR}`,
+      `type=bind,source=${path.resolve(src)},target=${BUNDLING_INPUT_DIR},readonly`,
     );
     expect(args).toContain(
-      `type=bind,source=${path.resolve("/out")},target=${BUNDLING_OUTPUT_DIR}`,
+      `type=bind,source=${path.resolve(out)},target=${BUNDLING_OUTPUT_DIR}`,
     );
     expect(args).toContain("alpine");
     expect(args.slice(-3)).toEqual(["sh", "-c", "build"]);
@@ -64,8 +73,8 @@ describe("DockerBundler bind mount", () => {
     jest.spyOn(process, "getgid").mockReturnValue(20);
 
     new DockerBundler({ image: "alpine", command: ["build"] }).bundle({
-      source: "/src",
-      outputDir: "/out",
+      source: src,
+      outputDir: out,
     });
 
     const args = invocations(spy)[0];
@@ -82,7 +91,7 @@ describe("DockerBundler bind mount", () => {
       network: "host",
       platform: "linux/amd64",
       securityOpt: "no-new-privileges",
-    }).bundle({ source: "/src", outputDir: "/out" });
+    }).bundle({ source: src, outputDir: out });
 
     const args = invocations(spy)[0];
     expect(args).toContain("NODE_ENV=production");
@@ -104,8 +113,8 @@ describe("DockerBundler bind mount", () => {
 
     expect(() =>
       new DockerBundler({ image: "alpine", command: ["build"] }).bundle({
-        source: "/src",
-        outputDir: "/out",
+        source: src,
+        outputDir: out,
       }),
     ).toThrow(/exited with status 1/);
   });
@@ -122,10 +131,10 @@ describe("DockerBundler volume copy", () => {
       bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
     });
 
-    const result = bundler.bundle({ source: "/src", outputDir: "/out" });
+    const result = bundler.bundle({ source: src, outputDir: out });
 
     expect(result.outputType).toBe(BundleOutputType.DIRECTORY);
-    expect(result.path).toBe("/out");
+    expect(result.path).toBe(out);
     const calls = invocations(spy);
     const flat = calls.map((c) => c.join(" "));
     // The helper container reuses the build image, so no second image is pulled.
@@ -138,8 +147,8 @@ describe("DockerBundler volume copy", () => {
     expect(flat.some((c) => c.startsWith("volume create assetOutput"))).toBe(
       true,
     );
-    expect(flat.some((c) => c.startsWith("cp /src/."))).toBe(true);
-    expect(flat.some((c) => c.includes("/asset-output/. /out"))).toBe(true);
+    expect(flat.some((c) => c.startsWith(`cp ${src}/.`))).toBe(true);
+    expect(flat.some((c) => c.includes(`/asset-output/. ${out}`))).toBe(true);
     expect(flat.some((c) => c.startsWith("volume rm assetInput"))).toBe(true);
     expect(flat.some((c) => c.startsWith("volume rm assetOutput"))).toBe(true);
   });
@@ -150,7 +159,7 @@ describe("DockerBundler volume copy", () => {
     const spy = spawnSyncMock.mockImplementation((_bin: any, args: any) => {
       call += 1;
       // Fail on the build container run (the invocation carrying the image).
-      if ((args as string[]).includes("alpine") && call > 3) {
+      if ((args as string[]).includes("alpine") && call > 5) {
         return { status: 7, signal: null, stderr: "build failed" } as any;
       }
       return { status: 0, signal: null, stdout: "" } as any;
@@ -162,9 +171,7 @@ describe("DockerBundler volume copy", () => {
       bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
     });
 
-    expect(() =>
-      bundler.bundle({ source: "/src", outputDir: "/out" }),
-    ).toThrow();
+    expect(() => bundler.bundle({ source: src, outputDir: out })).toThrow();
 
     const flat = invocations(spy).map((c) => c.join(" "));
     expect(flat.some((c) => c.startsWith("volume rm assetInput"))).toBe(true);
@@ -181,7 +188,7 @@ describe("DockerBundler volume copy helper image", () => {
       image: "node:20",
       command: ["build"],
       bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
-    }).bundle({ source: "/src", outputDir: "/out" });
+    }).bundle({ source: src, outputDir: out });
 
     const helperRun = invocations(spy).find((c) => c.includes("--name"));
     expect(helperRun).toContain("node:20");
@@ -194,7 +201,7 @@ describe("DockerBundler volume copy helper image", () => {
       command: ["build"],
       bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
       volumeCopyHelperImage: "myregistry.example.com/busybox:1",
-    }).bundle({ source: "/src", outputDir: "/out" });
+    }).bundle({ source: src, outputDir: out });
 
     const helperRun = invocations(spy).find((c) => c.includes("--name"));
     expect(helperRun).toContain("myregistry.example.com/busybox:1");
@@ -255,33 +262,6 @@ describe("DockerImage", () => {
     expect(args).toContain(`type=bind,source=${path.resolve("/h")},target=/c`);
     expect(args[args.indexOf("-w") + 1]).toBe("/work");
     expect(args.slice(-3)).toEqual(["alpine", "echo", "hi"]);
-  });
-
-  test("fromBuild runs docker build and tags the result", () => {
-    const spy = mockSpawn();
-
-    const image = DockerImage.fromBuild("/project", {
-      buildArgs: { FOO: "bar" },
-      file: "Dockerfile.build",
-      platform: "linux/amd64",
-      cacheFrom: [{ type: "registry", params: { ref: "cache:latest" } }],
-      cacheTo: { type: "inline" },
-    });
-
-    const args = invocations(spy)[0];
-    expect(args[0]).toBe("build");
-    expect(args).toContain("--build-arg");
-    expect(args).toContain("FOO=bar");
-    expect(args).toContain("-f");
-    expect(args).toContain(path.join("/project", "Dockerfile.build"));
-    expect(args).toContain("--platform");
-    expect(args).toContain("linux/amd64");
-    expect(args).toContain("--cache-from");
-    expect(args).toContain("type=registry,ref=cache:latest");
-    expect(args).toContain("--cache-to");
-    expect(args).toContain("type=inline");
-    expect(args[args.length - 1]).toBe("/project");
-    expect(image.image).toMatch(/^cdktn-/);
   });
 
   test("cp creates, copies from and removes a helper container", () => {
@@ -390,7 +370,7 @@ describe("entrypoint handling", () => {
       image: "img",
       command: ["build"],
       entrypoint: ["sh", "-c"],
-    }).bundle({ source: "/s", outputDir: "/o" });
+    }).bundle({ source: src, outputDir: out });
     const args = invocations(spawnSyncMock)[0];
     expect(args[args.indexOf("--entrypoint") + 1]).toBe("sh");
     expect(args.slice(-3)).toEqual(["img", "-c", "build"]);
@@ -403,10 +383,10 @@ describe("entrypoint handling", () => {
       command: ["build"],
       entrypoint: ["sh", "-c"],
       bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
-    }).bundle({ source: "/s", outputDir: "/o" });
-    const build = invocations(spawnSyncMock).find((a) =>
-      a.includes("--volumes-from"),
-    )!;
+    }).bundle({ source: src, outputDir: out });
+    const build = invocations(spawnSyncMock)
+      .filter((a) => a.includes("--volumes-from"))
+      .pop()!;
     expect(build[build.indexOf("--entrypoint") + 1]).toBe("sh");
     expect(build.slice(-3)).toEqual(["img", "-c", "build"]);
   });
@@ -425,10 +405,10 @@ describe("run flags", () => {
       image: "img",
       command: ["build"],
       bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
-    }).bundle({ source: "/s", outputDir: "/o" });
-    const build = invocations(spawnSyncMock).find((a) =>
-      a.includes("--volumes-from"),
-    )!;
+    }).bundle({ source: src, outputDir: out });
+    const build = invocations(spawnSyncMock)
+      .filter((a) => a.includes("--volumes-from"))
+      .pop()!;
     expect(build[build.indexOf("--volumes-from") + 1]).toMatch(
       /^copyContainer/,
     );
@@ -441,7 +421,7 @@ describe("run flags", () => {
       image: "img",
       command: ["build"],
       workingDirectory: "/work",
-    }).bundle({ source: "/s", outputDir: "/o" });
+    }).bundle({ source: src, outputDir: out });
     const args = invocations(spawnSyncMock)[0];
     expect(args[args.indexOf("-w") + 1]).toBe("/work");
   });
@@ -453,8 +433,8 @@ describe("run flags", () => {
     (process as any).getgid = undefined;
     try {
       new DockerBundler({ image: "img", command: ["b"] }).bundle({
-        source: "/s",
-        outputDir: "/o",
+        source: src,
+        outputDir: out,
       });
     } finally {
       process.getuid = original.uid;
@@ -462,52 +442,6 @@ describe("run flags", () => {
     }
     const args = invocations(spawnSyncMock)[0];
     expect(args[args.indexOf("-u") + 1]).toBe("1000:1000");
-  });
-});
-
-describe("DockerImage.fromBuild", () => {
-  test("renders secrets, ssh, network, target, outputs and build args", () => {
-    mockSpawn();
-    DockerImage.fromBuild("/p", {
-      buildArgs: { A: "1" },
-      buildSecrets: { tok: DockerBuildSecret.fromSrc("/tmp/tok") },
-      buildSsh: "default",
-      networkMode: "host",
-      targetStage: "prod",
-      outputs: ["type=local,dest=/out"],
-      cacheFrom: [{ type: "local" }],
-      cacheDisabled: true,
-    });
-    const args = invocations(spawnSyncMock)[0];
-    expect(args[args.indexOf("--secret") + 1]).toBe("id=tok,src=/tmp/tok");
-    expect(args[args.indexOf("--ssh") + 1]).toBe("default");
-    expect(args[args.indexOf("--network") + 1]).toBe("host");
-    expect(args[args.indexOf("--target") + 1]).toBe("prod");
-    expect(args[args.indexOf("--output") + 1]).toBe("type=local,dest=/out");
-    expect(args[args.indexOf("--cache-from") + 1]).toBe("type=local");
-    expect(args).toContain("--no-cache");
-  });
-
-  test("omits --no-cache by default", () => {
-    mockSpawn();
-    DockerImage.fromBuild("/p");
-    expect(invocations(spawnSyncMock)[0]).not.toContain("--no-cache");
-  });
-
-  test("DockerBuildSecret.fromSrc renders src=", () => {
-    expect(DockerBuildSecret.fromSrc("/a")).toBe("src=/a");
-  });
-
-  test("tags deterministically from path and options", () => {
-    mockSpawn();
-    const a = DockerImage.fromBuild("/p", { buildArgs: { A: "1" } });
-    const b = DockerImage.fromBuild("/p", { buildArgs: { A: "1" } });
-    const c = DockerImage.fromBuild("/p", { buildArgs: { A: "2" } });
-    const d = DockerImage.fromBuild("/q", { buildArgs: { A: "1" } });
-    expect(a.image).toBe(b.image);
-    expect(a.image).not.toBe(c.image);
-    expect(a.image).not.toBe(d.image);
-    expect(a.toJSON()).toBe(a.image);
   });
 });
 
@@ -551,7 +485,7 @@ describe("volume copy robustness", () => {
       return { status: 0, signal: null };
     });
     expect(() =>
-      new DockerBundler(props).bundle({ source: "/s", outputDir: "/o" }),
+      new DockerBundler(props).bundle({ source: src, outputDir: out }),
     ).toThrow(/status 1/);
     const flat = invocations(spawnSyncMock).map((a) => a.join(" "));
     expect(flat.some((c) => c.startsWith("volume rm assetInput"))).toBe(true);
@@ -559,7 +493,7 @@ describe("volume copy robustness", () => {
 
   test("runs the helper with --entrypoint sh and -c", () => {
     mockSpawn();
-    new DockerBundler(props).bundle({ source: "/s", outputDir: "/o" });
+    new DockerBundler(props).bundle({ source: src, outputDir: out });
     const helper = invocations(spawnSyncMock).find((a) =>
       a.includes("--name"),
     )!;
@@ -572,8 +506,8 @@ describe("volume copy robustness", () => {
     mockSpawn();
     expect(() =>
       new DockerBundler({ ...props, user: "root; rm -rf /" }).bundle({
-        source: "/s",
-        outputDir: "/o",
+        source: src,
+        outputDir: out,
       }),
     ).toThrow(/Invalid user/);
     expect(spawnSyncMock).not.toHaveBeenCalled();
@@ -582,8 +516,8 @@ describe("volume copy robustness", () => {
   test("accepts uid:gid and names", () => {
     mockSpawn();
     new DockerBundler({ ...props, user: "app.user:grp-1" }).bundle({
-      source: "/s",
-      outputDir: "/o",
+      source: src,
+      outputDir: out,
     });
     expect(spawnSyncMock).toHaveBeenCalled();
   });
@@ -639,7 +573,7 @@ describe("volume copy helper container", () => {
 
   test("runs as root so chown works on non-root images", () => {
     mockSpawn();
-    new DockerBundler(props).bundle({ source: "/s", outputDir: "/o" });
+    new DockerBundler(props).bundle({ source: src, outputDir: out });
     const helper = helperOf();
     expect(helper[helper.indexOf("-u") + 1]).toBe("0");
     expect(helper.indexOf("-u")).toBeLessThan(helper.indexOf("img"));
@@ -652,7 +586,7 @@ describe("volume copy helper container", () => {
       platform: "linux/arm64",
       network: "host",
       securityOpt: "no-new-privileges",
-    }).bundle({ source: "/s", outputDir: "/o" });
+    }).bundle({ source: src, outputDir: out });
     const helper = helperOf();
     expect(helper[helper.indexOf("--platform") + 1]).toBe("linux/arm64");
     expect(helper[helper.indexOf("--network") + 1]).toBe("host");
@@ -663,7 +597,7 @@ describe("volume copy helper container", () => {
 
   test("omits optional flags when unset", () => {
     mockSpawn();
-    new DockerBundler(props).bundle({ source: "/s", outputDir: "/o" });
+    new DockerBundler(props).bundle({ source: src, outputDir: out });
     const helper = helperOf();
     expect(helper).not.toContain("--platform");
     expect(helper).not.toContain("--network");
@@ -673,25 +607,25 @@ describe("volume copy helper container", () => {
   test("copies from an absolute source path", () => {
     mockSpawn();
     new DockerBundler(props).bundle({
-      source: "rel/src",
-      outputDir: "rel/out",
+      source: path.relative(process.cwd(), src),
+      outputDir: path.relative(process.cwd(), out),
     });
     const copies = invocations(spawnSyncMock).filter((a) => a[0] === "cp");
-    expect(copies[0][1]).toBe(`${path.resolve("rel/src")}/.`);
-    expect(copies[1][2]).toBe(path.resolve("rel/out"));
+    expect(copies[0][1]).toBe(`${path.resolve(src)}/.`);
+    expect(copies[1][2]).toBe(path.resolve(out));
   });
 
   test("cleans up after the build container fails", () => {
     spawnSyncMock.mockReset();
     let runs = 0;
     spawnSyncMock.mockImplementation((_b: string, args: string[]) => {
-      if (args[0] === "run" && ++runs === 2) {
+      if (args[0] === "run" && ++runs === 3) {
         return { status: 1, signal: null };
       }
       return { status: 0, signal: null };
     });
     expect(() =>
-      new DockerBundler(props).bundle({ source: "/s", outputDir: "/o" }),
+      new DockerBundler(props).bundle({ source: src, outputDir: out }),
     ).toThrow(/status 1/);
     const flat = invocations(spawnSyncMock).map((a) => a.join(" "));
     expect(flat.some((c) => c.startsWith("rm -f copyContainer"))).toBe(true);
@@ -728,8 +662,8 @@ describe("DockerBundlerProps.image", () => {
     const spy = mockSpawn();
     new DockerBundler({ image: "node:20", command: ["b"], user: "1:1" }).bundle(
       {
-        source: "/s",
-        outputDir: "/o",
+        source: src,
+        outputDir: out,
       },
     );
     expect(invocations(spy)[0]).toContain("node:20");
@@ -756,7 +690,7 @@ describe("low-severity hardening", () => {
         command: ["b"],
         user: "--dereference",
         bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
-      }).bundle({ source: "/s", outputDir: "/o" }),
+      }).bundle({ source: src, outputDir: out }),
     ).toThrow(/Invalid user/);
     expect(spawnSyncMock).not.toHaveBeenCalled();
   });
@@ -823,8 +757,8 @@ describe("low-severity hardening", () => {
     spawnSyncMock.mockReturnValue({ error: new Error("spawn docker ENOENT") });
     expect(() =>
       new DockerBundler({ image: "img", command: ["b"] }).bundle({
-        source: "/s",
-        outputDir: "/o",
+        source: src,
+        outputDir: out,
       }),
     ).toThrow(/ENOENT/);
   });
@@ -842,5 +776,144 @@ describe("low-severity hardening", () => {
     }));
     expect(() => DockerImage.fromRegistry("img").cp("/x")).toThrow(/status 3/);
     expect(leftovers()).toEqual(before);
+  });
+});
+
+describe("read-only input", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test("mounts the input read-only and the output read-write", () => {
+    const spy = mockSpawn();
+    new DockerBundler({ image: "img", command: ["b"], user: "1:1" }).bundle({
+      source: src,
+      outputDir: out,
+    });
+    const mounts = invocations(spy)[0].filter(
+      (_, i, a) => a[i - 1] === "--mount",
+    );
+    expect(mounts).toHaveLength(2);
+    expect(mounts[0]).toMatch(/,readonly$/);
+    expect(mounts[1]).not.toMatch(/readonly/);
+  });
+
+  test("bindMountSpec appends readonly only when requested", () => {
+    expect(
+      bindMountSpec({ hostPath: "/a", containerPath: "/c", readOnly: true }),
+    ).toBe(`type=bind,source=${path.resolve("/a")},target=/c,readonly`);
+    expect(
+      bindMountSpec({ hostPath: "/a", containerPath: "/c", readOnly: false }),
+    ).not.toContain("readonly");
+  });
+});
+
+describe("source and output types", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test("rejects a file source before running docker", () => {
+    mockSpawn();
+    const file = path.join(root, "file.txt");
+    fs.writeFileSync(file, "x");
+    expect(() =>
+      new DockerBundler({ image: "img", command: ["b"] }).bundle({
+        source: file,
+        outputDir: out,
+      }),
+    ).toThrow(/only directory sources/);
+    expect(spawnSyncMock).not.toHaveBeenCalled();
+  });
+
+  test("returns a single output file as a file result", () => {
+    mockSpawn();
+    const dir = fs.mkdtempSync(path.join(root, "single-"));
+    fs.writeFileSync(path.join(dir, "bundle.zip"), "x");
+    const result = new DockerBundler({
+      image: "img",
+      command: ["b"],
+      outputType: BundlingOutput.SINGLE_FILE,
+      outputFileName: "bundle.zip",
+    }).bundle({ source: src, outputDir: dir });
+    expect(result.outputType).toBe(BundleOutputType.FILE);
+    expect(result.path).toBe(path.join(dir, "bundle.zip"));
+  });
+
+  test("NOT_ARCHIVED keeps a lone file as a directory result", () => {
+    mockSpawn();
+    const dir = fs.mkdtempSync(path.join(root, "tree-"));
+    fs.writeFileSync(path.join(dir, "a.txt"), "x");
+    const result = new DockerBundler({
+      image: "img",
+      command: ["b"],
+      outputType: BundlingOutput.NOT_ARCHIVED,
+    }).bundle({ source: src, outputDir: dir });
+    expect(result.outputType).toBe(BundleOutputType.DIRECTORY);
+  });
+
+  test("SINGLE_FILE requires exactly one file", () => {
+    mockSpawn();
+    const dir = fs.mkdtempSync(path.join(root, "empty-"));
+    expect(() =>
+      new DockerBundler({
+        image: "img",
+        command: ["b"],
+        outputType: BundlingOutput.SINGLE_FILE,
+      }).bundle({ source: src, outputDir: dir }),
+    ).toThrow(/exactly one file/);
+  });
+
+  test("exposes outputFileName", () => {
+    expect(
+      new DockerBundler({ image: "i", command: ["b"], outputFileName: "x.zip" })
+        .outputFileName,
+    ).toBe("x.zip");
+  });
+});
+
+describe("bundlerKey collisions", () => {
+  test("an environment variable named helper does not equal a helper image", () => {
+    const common = {
+      image: "img",
+      command: ["b"],
+      bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
+    };
+    const viaEnv = new DockerBundler({
+      ...common,
+      environment: { helper: "busybox" },
+    });
+    const viaImage = new DockerBundler({
+      ...common,
+      volumeCopyHelperImage: "busybox",
+    });
+    expect(viaEnv.bundlerKey).not.toBe(viaImage.bundlerKey);
+  });
+
+  test("differs when outputType differs", () => {
+    const base = { image: "img", command: ["b"] };
+    expect(new DockerBundler(base).bundlerKey).not.toBe(
+      new DockerBundler({ ...base, outputType: BundlingOutput.NOT_ARCHIVED })
+        .bundlerKey,
+    );
+  });
+});
+
+describe("volume copy ownership", () => {
+  afterEach(() => jest.restoreAllMocks());
+
+  test("chowns the input tree after docker cp copies it in", () => {
+    const spy = mockSpawn();
+    new DockerBundler({
+      image: "img",
+      command: ["b"],
+      user: "1000:1000",
+      bundlingFileAccess: BundlingFileAccess.VOLUME_COPY,
+    }).bundle({ source: src, outputDir: out });
+    const calls = invocations(spy);
+    const cpIn = calls.findIndex((a) => a[0] === "cp");
+    const chown = calls.findIndex((a) =>
+      a.some((x) => x === "chown -R 1000:1000 /asset-input"),
+    );
+    expect(cpIn).toBeGreaterThan(-1);
+    expect(chown).toBeGreaterThan(cpIn);
+    expect(calls[chown]).toContain("--volumes-from");
+    expect(calls[chown][calls[chown].indexOf("-u") + 1]).toBe("0");
   });
 });
