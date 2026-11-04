@@ -9,7 +9,7 @@
     "package": "pnpm -r --if-present run package"
   },
   "devDependencies": {
-    "@types/node": "^26.6.5",
+    "@types/node": "^26.6.6",
     "jsii": "~6.0.19",
     "jsii-pacmak": "^1.142.0",
     "publib": "0.3.11",
