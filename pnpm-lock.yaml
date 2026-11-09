@@ -27,6 +27,24 @@ importers:
         specifier: ~6.0.0
         version: 6.0.3
 
+  packages/docker:
+    devDependencies:
+      '@types/jest':
+        specifier: 30.0.0
+        version: 30.0.0
+      cdktn:
+        specifier: 0.25.0
+        version: 0.25.0(constructs@10.6.0)
+      constructs:
+        specifier: 10.6.0
+        version: 10.6.0
+      jest:
+        specifier: 30.5.2
+        version: 30.5.2(@types/node@26.6.5)(supports-color@8.1.1)
+      ts-jest:
+        specifier: 29.4.15
+        version: 29.4.15(@babel/core@7.29.7(supports-color@8.1.1))(@jest/transform@30.5.2(supports-color@8.1.1))(@jest/types@30.5.1)(babel-jest@30.5.2(@babel/core@7.29.7(supports-color@8.1.1))(supports-color@8.1.1))(jest-util@30.5.1)(jest@30.5.2(@types/node@26.6.5)(supports-color@8.1.1))(typescript@6.0.3)
+
   packages/local:
     devDependencies:
       '@types/jest':
@@ -532,6 +550,7 @@ packages:
   '@smithy/core@3.36.2':
     resolution: {integrity: sha512-oRw0rB9QSUiCZfEs23G5F4Af+b2rQt1lItIICWu5IejFNd+uPM8SWqiKLMpQ6bX1Q7slsLbjuoE2niErFtkVPQ==}
     engines: {node: '>=18.0.0'}
+    deprecated: Deprecated due to a bug in custom logger data redaction. See https://github.com/aws/aws-sdk-js-v3/issues/8393.
 
   '@smithy/credential-provider-imds@4.5.2':
     resolution: {integrity: sha512-A9uSdn72ozbRUSit0eib0TW7nXuNPlaeM0zcGkJ+nE6tFcSDbnmtwoxbTCFBukVQcszDAyvsd7+rTduPTXpygg==}
@@ -885,6 +904,9 @@ packages:
   commonmark@0.31.2:
     resolution: {integrity: sha512-2fRLTyb9r/2835k5cwcAwOj0DEc44FARnMp5veGsJ+mEAZdi52sNopLu07ZyElQUz058H43whzlERDIaaSw4rg==}
     hasBin: true
+
+  constructs@10.6.0:
+    resolution: {integrity: sha512-TxHOnBO5zMo/G76ykzGF/wMpEHu257TbWiIxP9K0Yv/+t70UzgBQiTqjkAsWOPC6jW91DzJI0+ehQV6xDRNBuQ==}
 
   constructs@10.8.1:
     resolution: {integrity: sha512-98yGXYyhePqPYh3cYu8nzBERmAhC0DONe3UD03okK0nehZ7hYP4wgZuf02a04+uOWxnTJ5Rpp5m0GRNpwyLGGA==}
@@ -2758,6 +2780,10 @@ snapshots:
 
   case@1.6.3: {}
 
+  cdktn@0.25.0(constructs@10.6.0):
+    dependencies:
+      constructs: 10.6.0
+
   cdktn@0.25.0(constructs@10.8.1):
     dependencies:
       constructs: 10.8.1
@@ -2802,6 +2828,8 @@ snapshots:
       entities: 3.0.1
       mdurl: 1.0.1
       minimist: 1.2.8
+
+  constructs@10.6.0: {}
 
   constructs@10.8.1: {}
 
