@@ -90,10 +90,13 @@ jobs:
           PATHS_RELEASED: ${{ needs.release_please.outputs.paths_released }}
         run: |
           set -euo pipefail
-          # Go: every package. publib-golang replaces all modules in
-          # cdktn-bundlers-go on each push (only new versions get tags), so
-          # leaving one out would delete it there.
-          pnpm exec jsii-pacmak packages/*/ --outdir dist --targets go
+          # Go: every package that has been released. publib-golang replaces
+          # all modules in cdktn-bundlers-go on each push (only new versions
+          # get tags), so leaving a released one out would delete it there.
+          # A package still at 0.0.0 has not had its first release yet and
+          # would otherwise be tagged `<pkg>/v0.0.0`.
+          mapfile -t go_pkgs < <(jq -r 'to_entries[] | select(.value != "0.0.0") | .key' .release-please-manifest.json)
+          pnpm exec jsii-pacmak "${go_pkgs[@]}" --outdir dist --targets go
           # Everything else: only what was just released. publib-maven skips
           # the whole upload if any version in it is already published.
           mapfile -t released < <(jq -r '.[]' <<<"$PATHS_RELEASED")
