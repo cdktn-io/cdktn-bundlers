@@ -10,6 +10,10 @@
 # approved by a second team-cdk-terrain member, and the only place the
 # publishing secrets exist. Every publish step skips versions that are already
 # on its registry, so a failed publish is retried with "Re-run failed jobs".
+# A re-run uses the workflow file of the original run, though. If the fix is a
+# change to this file, merge it and then run this workflow manually on main
+# with the package path (e.g. `packages/docker`) to republish that package's
+# current release; the build refuses if the package changed since its tag.
 #
 # A new package needs one-time registry setup before its first release PR is
 # merged: docs/adding-a-package.md.
@@ -19,6 +23,12 @@ name: release
 on:
   push:
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      package:
+        description: Package path to republish at its released version (e.g. packages/docker)
+        required: true
+        type: string
 
 concurrency:
   group: release
@@ -34,10 +44,13 @@ jobs:
     outputs:
       releases_created: ${{ steps.release.outputs.releases_created }}
       paths_released: ${{ steps.release.outputs.paths_released }}
+    # On workflow_dispatch both steps are skipped but the job still succeeds;
+    # skipping the job itself would also skip every job downstream of it.
     steps:
       # Release PRs opened with GITHUB_TOKEN would not trigger CI, and `build`
       # is a required check, so they would never be mergeable.
       - name: Generate release-please token
+        if: ${{ github.event_name == 'push' }}
         id: token
         uses: actions/create-github-app-token@64ab729a6294000f5aa4a4bc0b73d1f32bc45510 # v3.3.0
         with:
@@ -47,6 +60,7 @@ jobs:
           permission-pull-requests: write
           permission-issues: write # release-please's PR labels
       - uses: googleapis/release-please-action@45996ed1f6d02564a971a2fa1b5860e934307cf7 # v5.0.0
+        if: ${{ github.event_name == 'push' }}
         id: release
         with:
           token: ${{ steps.token.outputs.token }}
@@ -54,7 +68,9 @@ jobs:
   build:
     name: build
     needs: release_please
-    if: ${{ needs.release_please.outputs.releases_created == 'true' }}
+    if: >-
+      ${{ needs.release_please.outputs.releases_created == 'true' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main') }}
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -62,6 +78,32 @@ jobs:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
+      - name: Resolve packages to publish
+        id: paths
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PATHS_RELEASED: ${{ needs.release_please.outputs.paths_released }}
+          REPUBLISH: ${{ inputs.package }}
+        run: |
+          set -euo pipefail
+          if [[ "$EVENT_NAME" != workflow_dispatch ]]; then
+            echo "released=$PATHS_RELEASED" >>"$GITHUB_OUTPUT"
+            exit 0
+          fi
+          REPUBLISH="${REPUBLISH%/}"
+          version=$(jq -r --arg p "$REPUBLISH" '.[$p] // ""' .release-please-manifest.json)
+          if [[ -z "$version" || "$version" == 0.0.0 ]]; then
+            echo "::error::'$REPUBLISH' is not a released package in .release-please-manifest.json"
+            exit 1
+          fi
+          # release-please tags `<package name without scope>-v<version>`.
+          tag="$(jq -r '.name | sub("^@[^/]+/"; "")' "$REPUBLISH/package.json")-v$version"
+          git fetch --no-tags --depth=1 origin "refs/tags/$tag:refs/tags/$tag"
+          if ! git diff --quiet "$tag" HEAD -- "$REPUBLISH"; then
+            echo "::error::$REPUBLISH changed since $tag; republishing would ship unreleased code as $version"
+            exit 1
+          fi
+          echo "released=$(jq -cn --arg p "$REPUBLISH" '[$p]')" >>"$GITHUB_OUTPUT"
       - uses: pnpm/action-setup@73e46992e05b19abd31f2f3c20e0e7370d762115 # v6.1.1
       - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
         with:
@@ -87,7 +129,7 @@ jobs:
       - run: pnpm run test
       - name: package
         env:
-          PATHS_RELEASED: ${{ needs.release_please.outputs.paths_released }}
+          PATHS_RELEASED: ${{ steps.paths.outputs.released }}
         run: |
           set -euo pipefail
           # Go: every package that has been released. publib-golang replaces
