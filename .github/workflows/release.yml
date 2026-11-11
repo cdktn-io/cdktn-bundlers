@@ -258,7 +258,10 @@ jobs:
           permission-contents: write
       - name: Publish
         env:
-          GITHUB_TOKEN: x-access-token:${{ steps.token.outputs.token }}
+          # Bare token: publib >= 0.3.12 builds the remote URL as
+          # https://x-access-token:<GITHUB_TOKEN>@github.com/..., so adding the
+          # prefix here doubles it and the push is rejected.
+          GITHUB_TOKEN: ${{ steps.token.outputs.token }}
           GIT_USER_NAME: team-cdk-terrain
           GIT_USER_EMAIL: github-team-cdk-terrain@cdktn.io
         run: pnpm exec publib-golang dist/go
