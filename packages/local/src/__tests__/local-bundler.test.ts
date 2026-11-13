@@ -6,11 +6,7 @@ import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
 import { BundleOutputType } from "cdktn";
-import {
-  BundlingOutput,
-  LocalBundler,
-  determineBundledArtifact,
-} from "../local-bundler";
+import { LocalBundler } from "../local-bundler";
 
 jest.mock("child_process");
 
@@ -52,7 +48,7 @@ describe("LocalBundler", () => {
     const bundler = new LocalBundler({
       command: ["sh", "-c", "true"],
       environment: { FOO: "bar" },
-      outputType: BundlingOutput.NOT_ARCHIVED,
+      outputType: BundleOutputType.DIRECTORY,
     });
 
     const spy = mockSpawn({ status: 0, signal: null });
@@ -167,10 +163,10 @@ describe("LocalBundler", () => {
     expect(() => bundler.bundle({ source, outputDir })).toThrow(/EMFILE/);
   });
 
-  test("returns a file result when the command produces a single file", () => {
+  test("returns a file result when the output type is FILE", () => {
     const bundler = new LocalBundler({
       command: ["sh", "-c", "true"],
-      outputType: BundlingOutput.SINGLE_FILE,
+      outputType: BundleOutputType.FILE,
     });
     mockSpawn({ status: 0, signal: null });
     fs.writeFileSync(path.join(outputDir, "bundle.zip"), "z");
@@ -179,6 +175,69 @@ describe("LocalBundler", () => {
 
     expect(result.outputType).toBe(BundleOutputType.FILE);
     expect(result.path).toBe(path.join(outputDir, "bundle.zip"));
+  });
+
+  test("DIRECTORY is the default and keeps a lone file as a directory", () => {
+    const bundler = new LocalBundler({ command: ["sh", "-c", "true"] });
+    mockSpawn({ status: 0, signal: null });
+    fs.writeFileSync(path.join(outputDir, "a.txt"), "x");
+
+    const result = bundler.bundle({ source, outputDir });
+
+    expect(result.outputType).toBe(BundleOutputType.DIRECTORY);
+    expect(result.path).toBe(outputDir);
+  });
+
+  test("outputFileName defaults the output type to FILE", () => {
+    const bundler = new LocalBundler({
+      command: ["sh", "-c", "true"],
+      outputFileName: "bundle.zip",
+    });
+    mockSpawn({ status: 0, signal: null });
+    fs.writeFileSync(path.join(outputDir, "bundle.zip"), "z");
+
+    const result = bundler.bundle({ source, outputDir });
+
+    expect(result.outputType).toBe(BundleOutputType.FILE);
+  });
+
+  test("an explicit outputType wins over outputFileName", () => {
+    const bundler = new LocalBundler({
+      command: ["sh", "-c", "true"],
+      outputFileName: "bundle.zip",
+      outputType: BundleOutputType.DIRECTORY,
+    });
+    mockSpawn({ status: 0, signal: null });
+
+    const result = bundler.bundle({ source, outputDir });
+
+    expect(result.outputType).toBe(BundleOutputType.DIRECTORY);
+  });
+
+  test("FILE requires exactly one file", () => {
+    const bundler = new LocalBundler({
+      command: ["sh", "-c", "true"],
+      outputType: BundleOutputType.FILE,
+    });
+    mockSpawn({ status: 0, signal: null });
+
+    expect(() => bundler.bundle({ source, outputDir })).toThrow(
+      /exactly one file.*found 0/,
+    );
+  });
+
+  test("FILE throws when there is more than one file", () => {
+    const bundler = new LocalBundler({
+      command: ["sh", "-c", "true"],
+      outputType: BundleOutputType.FILE,
+    });
+    mockSpawn({ status: 0, signal: null });
+    fs.writeFileSync(path.join(outputDir, "bundle.zip"), "z");
+    fs.writeFileSync(path.join(outputDir, "bundle.zip.sha256"), "h");
+
+    expect(() => bundler.bundle({ source, outputDir })).toThrow(
+      /exactly one file.*found 2/,
+    );
   });
 
   test("throws when the output directory is missing", () => {
@@ -235,11 +294,11 @@ describe("LocalBundler", () => {
     test("changes when the output type changes", () => {
       const a = new LocalBundler({
         command: ["sh", "-c", "b"],
-        outputType: BundlingOutput.NOT_ARCHIVED,
+        outputType: BundleOutputType.DIRECTORY,
       });
       const b = new LocalBundler({
         command: ["sh", "-c", "b"],
-        outputType: BundlingOutput.SINGLE_FILE,
+        outputType: BundleOutputType.FILE,
       });
       expect(a.bundlerKey).not.toBe(b.bundlerKey);
     });
@@ -289,69 +348,5 @@ describe("LocalBundler", () => {
       });
       expect(bundler.outputFileName).toBe("lambda.zip");
     });
-  });
-});
-
-describe("determineBundledArtifact", () => {
-  let dir: string;
-
-  beforeEach(() => {
-    dir = tmpDir("bundler-local-artifact-");
-  });
-
-  afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
-  });
-
-  test("NOT_ARCHIVED returns the directory", () => {
-    fs.writeFileSync(path.join(dir, "a.txt"), "a");
-    expect(determineBundledArtifact(dir, BundlingOutput.NOT_ARCHIVED)).toBe(
-      dir,
-    );
-  });
-
-  test("SINGLE_FILE returns the single file", () => {
-    fs.writeFileSync(path.join(dir, "bundle.zip"), "z");
-    expect(determineBundledArtifact(dir, BundlingOutput.SINGLE_FILE)).toBe(
-      path.join(dir, "bundle.zip"),
-    );
-  });
-
-  test("SINGLE_FILE throws when there is no file", () => {
-    fs.mkdirSync(path.join(dir, "sub"));
-    expect(() =>
-      determineBundledArtifact(dir, BundlingOutput.SINGLE_FILE),
-    ).toThrow(/exactly one file.*found 0/);
-  });
-
-  test("SINGLE_FILE throws when there is more than one file", () => {
-    fs.writeFileSync(path.join(dir, "bundle.zip"), "z");
-    fs.writeFileSync(path.join(dir, "bundle.zip.sha256"), "h");
-    expect(() =>
-      determineBundledArtifact(dir, BundlingOutput.SINGLE_FILE),
-    ).toThrow(/exactly one file.*found 2/);
-  });
-
-  test("ARCHIVED throws when there is more than one file", () => {
-    fs.writeFileSync(path.join(dir, "a.zip"), "a");
-    fs.writeFileSync(path.join(dir, "b.zip"), "b");
-    expect(() =>
-      determineBundledArtifact(dir, BundlingOutput.ARCHIVED),
-    ).toThrow(/exactly one file/);
-  });
-
-  test("AUTO_DISCOVER returns the file when it is the only entry", () => {
-    fs.writeFileSync(path.join(dir, "only.js"), "j");
-    expect(determineBundledArtifact(dir, BundlingOutput.AUTO_DISCOVER)).toBe(
-      path.join(dir, "only.js"),
-    );
-  });
-
-  test("AUTO_DISCOVER returns the directory when there are several entries", () => {
-    fs.writeFileSync(path.join(dir, "a.js"), "a");
-    fs.writeFileSync(path.join(dir, "b.js"), "b");
-    expect(determineBundledArtifact(dir, BundlingOutput.AUTO_DISCOVER)).toBe(
-      dir,
-    );
   });
 });
