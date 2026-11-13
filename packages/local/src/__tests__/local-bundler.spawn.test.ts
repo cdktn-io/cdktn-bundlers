@@ -4,7 +4,7 @@
 import * as fs from "fs";
 import * as os from "os";
 import * as path from "path";
-import { BundlingOutput, LocalBundler } from "../local-bundler";
+import { LocalBundler } from "../local-bundler";
 
 function tmpDir(prefix: string): string {
   return fs.mkdtempSync(path.join(os.tmpdir(), prefix));
@@ -28,10 +28,7 @@ describe("LocalBundler (real process spawn)", () => {
   // are `.cmd` shims that `child_process.spawnSync` cannot run without a
   // shell, which a mocked child_process would not catch.
   test("runs npm without declining", () => {
-    const bundler = new LocalBundler({
-      command: ["npm", "--version"],
-      outputType: BundlingOutput.NOT_ARCHIVED,
-    });
+    const bundler = new LocalBundler({ command: ["npm", "--version"] });
 
     const result = bundler.bundle({ source, outputDir });
 

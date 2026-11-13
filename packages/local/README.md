@@ -11,14 +11,13 @@ already be installed on the host; for an isolated, reproducible build use
 
 ```ts
 import { TerraformAsset, AssetType } from "cdktn";
-import { LocalBundler, BundlingOutput } from "@cdktn/bundler-local";
+import { LocalBundler } from "@cdktn/bundler-local";
 
 new TerraformAsset(this, "asset", {
   path: "./src",
   type: AssetType.DIRECTORY,
   bundler: new LocalBundler({
     command: ["sh", "-c", "npm run build -- --out-dir \"$ASSET_OUTPUT_DIR\""],
-    outputType: BundlingOutput.NOT_ARCHIVED,
   }),
 });
 ```
