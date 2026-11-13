@@ -1,7 +1,6 @@
 // Copyright (c) cdktn-io
 // SPDX-License-Identifier: MPL-2.0
 
-import { spawnSync } from "child_process";
 import { createHash } from "crypto";
 import { existsSync, readdirSync, statSync } from "fs";
 import * as path from "path";
@@ -12,6 +11,7 @@ import {
   BundlerKey,
   IAssetBundler,
 } from "cdktn";
+import { spawnSyncCrossPlatform } from "./windows-spawn";
 
 /**
  * Configuration for {@link LocalBundler}.
@@ -144,7 +144,7 @@ export class LocalBundler implements IAssetBundler {
       );
     }
 
-    const result = spawnSync(program, args, {
+    const result = spawnSyncCrossPlatform(program, args, {
       cwd,
       // Stream the build's output straight through instead of capturing it:
       // capturing is bounded by spawnSync's 1 MiB maxBuffer, which SIGTERMs a
