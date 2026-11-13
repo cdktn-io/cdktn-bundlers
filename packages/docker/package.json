@@ -1,6 +1,6 @@
 {
   "name": "@cdktn/bundler-docker",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Container-based asset bundler for CDK Terrain",
   "license": "MPL-2.0",
   "author": {
