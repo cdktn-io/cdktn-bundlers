@@ -17,6 +17,7 @@ function tmpDir(prefix: string): string {
 const describeWindows = process.platform === "win32" ? describe : describe.skip;
 
 describeWindows("spawnSyncCrossPlatform on Windows", () => {
+  const originalCwd = process.cwd();
   let root: string;
 
   beforeEach(() => {
@@ -24,11 +25,16 @@ describeWindows("spawnSyncCrossPlatform on Windows", () => {
   });
 
   afterEach(() => {
+    process.chdir(originalCwd);
     fs.rmSync(root, { recursive: true, force: true });
   });
 
-  test("round-trips tricky arguments through a node_modules/.bin shim unchanged", () => {
-    const binDir = path.join(root, "node_modules", ".bin");
+  // npm.cmd, npx.cmd and pnpm.cmd live outside node_modules/.bin.
+  test.each([
+    ["node_modules/.bin"],
+    ["scripts"],
+  ])("round-trips tricky arguments through a batch file in %s unchanged", (dir) => {
+    const binDir = path.join(root, dir);
     fs.mkdirSync(binDir, { recursive: true });
 
     const recorderScript = path.join(root, "record-args.js");
@@ -44,9 +50,21 @@ describeWindows("spawnSyncCrossPlatform on Windows", () => {
       `@node "${recorderScript}" %*\n`,
     );
 
-    const args = ["a b", "a&b", 'a"b', "a^b", "a!b", "a%b", "trailing\\", ""];
+    // 'a"&b' first: an earlier lone quote would flip cmd's quote state and
+    // hide a missing escape.
+    const args = [
+      'a"&b',
+      "a b",
+      "a&b",
+      'a"b',
+      "a^b",
+      "a!b",
+      "a%b",
+      "trailing\\",
+      "",
+    ];
     const result = spawnSyncCrossPlatform(
-      path.join("node_modules", ".bin", "echoargs.cmd"),
+      path.join(dir, "echoargs.cmd"),
       args,
       { cwd: root, env: { ...process.env, OUT_FILE: outFile } },
     );
@@ -65,6 +83,22 @@ describeWindows("spawnSyncCrossPlatform on Windows", () => {
 
     expect(() =>
       bundler.bundle({ source: root, outputDir: tmpDir("windows-spawn-out-") }),
+    ).toThrow(/status 1/);
+  });
+
+  test("resolves a relative command against a relative working directory", () => {
+    const appDir = path.join(root, "app");
+    fs.mkdirSync(path.join(appDir, "scripts"), { recursive: true });
+    fs.writeFileSync(path.join(appDir, "scripts", "fail.cmd"), "@exit /b 1\n");
+    process.chdir(root);
+
+    const bundler = new LocalBundler({
+      command: ["scripts/fail.cmd"],
+      workingDirectory: "app",
+    });
+
+    expect(() =>
+      bundler.bundle({ source: appDir, outputDir: tmpDir("windows-spawn-out-") }),
     ).toThrow(/status 1/);
   });
 

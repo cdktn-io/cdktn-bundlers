@@ -40,7 +40,7 @@ import * as path from "path";
 
 const isWin = process.platform === "win32";
 const isNativeExecutableRegExp = /\.(?:com|exe)$/i;
-const isCmdShimRegExp = /node_modules[\\/]\.bin[\\/][^\\/]+\.cmd$/i;
+const isBatchFileRegExp = /\.(?:cmd|bat)$/i;
 const metaCharsRegExp = /([()\][%!^"`<>&|;, *?])/g;
 
 /**
@@ -143,7 +143,10 @@ export function spawnSyncCrossPlatform(
     return spawnSync(command, args, options);
   }
 
-  const cwd = typeof options.cwd === "string" ? options.cwd : process.cwd();
+  // Absolute, so resolveOnWindows doesn't apply a relative cwd twice.
+  const cwd = path.resolve(
+    typeof options.cwd === "string" ? options.cwd : process.cwd(),
+  );
   const env = options.env ?? process.env;
   const file = resolveOnWindows(command, cwd, env);
   const needsShell = !file || !isNativeExecutableRegExp.test(file);
@@ -153,10 +156,9 @@ export function spawnSyncCrossPlatform(
   let windowsVerbatimArguments: boolean | undefined;
 
   if (needsShell) {
-    // A cmd-shim under node_modules/.bin proxies to a Node script, which
-    // re-interprets the already-escaped meta chars, so it needs them
-    // escaped twice.
-    const needsDoubleEscape = !!file && isCmdShimRegExp.test(file);
+    // A batch file re-parses the arguments it forwards, so meta chars need
+    // escaping twice.
+    const needsDoubleEscape = !!file && isBatchFileRegExp.test(file);
     const escapedCommand = escapeCommand(path.normalize(command));
     const escapedArgs = args.map((arg) =>
       escapeArgument(arg, needsDoubleEscape),
