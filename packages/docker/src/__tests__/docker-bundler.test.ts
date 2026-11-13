@@ -66,20 +66,26 @@ describe("DockerBundler bind mount", () => {
     expect(args.slice(-3)).toEqual(["sh", "-c", "build"]);
   });
 
-  test("defaults the user to the host uid:gid", () => {
-    const spy = mockSpawn();
-    jest.spyOn(process, "getuid").mockReturnValue(501);
-    jest.spyOn(process, "getgid").mockReturnValue(20);
+  // `process.getuid`/`getgid` only exist on POSIX; they are not present at
+  // all on Windows, so `jest.spyOn` (which requires the property to exist)
+  // cannot stub them there.
+  (process.platform === "win32" ? test.skip : test)(
+    "defaults the user to the host uid:gid",
+    () => {
+      const spy = mockSpawn();
+      jest.spyOn(process, "getuid").mockReturnValue(501);
+      jest.spyOn(process, "getgid").mockReturnValue(20);
 
-    new DockerBundler({ image: "alpine", command: ["build"] }).bundle({
-      source: src,
-      outputDir: out,
-    });
+      new DockerBundler({ image: "alpine", command: ["build"] }).bundle({
+        source: src,
+        outputDir: out,
+      });
 
-    const args = invocations(spy)[0];
-    const userIdx = args.indexOf("-u");
-    expect(args[userIdx + 1]).toBe("501:20");
-  });
+      const args = invocations(spy)[0];
+      const userIdx = args.indexOf("-u");
+      expect(args[userIdx + 1]).toBe("501:20");
+    },
+  );
 
   test("passes environment, network, platform and security options", () => {
     const spy = mockSpawn();
@@ -613,7 +619,8 @@ describe("bindMountSpec", () => {
 
   test("quotes fields that contain ',' or '\"'", () => {
     const spec = bindMountSpec({ hostPath: '/a,b/"c"', containerPath: "/c" });
-    expect(spec).toBe('type=bind,"source=/a,b/""c""",target=/c');
+    const resolved = path.resolve('/a,b/"c"').replace(/"/g, '""');
+    expect(spec).toBe(`type=bind,"source=${resolved}",target=/c`);
   });
 
   test("resolves relative host paths to absolute", () => {
