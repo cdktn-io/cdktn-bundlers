@@ -30,7 +30,7 @@
     "constructs": "^10.6.0"
   },
   "devDependencies": {
-    "cdktn": "0.25.0",
+    "cdktn": "0.25.1",
     "constructs": "10.8.1",
     "jest": "30.5.2",
     "ts-jest": "29.4.15",
